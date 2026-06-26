@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>台表科 6278 個股分析｜2026.06.25 更新</title>
+<title>台表科 6278 個股分析</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
 
@@ -422,62 +422,85 @@
   reveals.forEach(el => observer.observe(el));
 
   // ── Live price fetch ──
-  const COST    = 203.5;
-  const SHARES  = 19;
-  const SYMBOL  = '6278.TW';
+  const COST   = 203.5;
+  const SHARES = 19;
+
+  // 手動備用資料（API 失敗時顯示）
+  const MANUAL = { close: 190.5, open: 202.0, prevClose: 204.0, date: '2026/06/26' };
+
+  function renderPrice(close, open, prevClose, dateStr, isManual) {
+    const change    = close - prevClose;
+    const changePct = (change / prevClose * 100).toFixed(2);
+    const isRed     = close >= open;  // 台股：收盤≥開盤 = 紅K
+    const color     = isRed ? '#f05252' : '#34c77b';
+    const arrow     = change >= 0 ? '▲' : '▼';
+    const suffix    = isManual ? '（手動更新）' : '（自動更新）';
+
+    document.getElementById('livePrice').textContent = close.toFixed(1);
+    document.getElementById('livePrice').style.color = color;
+    document.getElementById('liveChange').textContent =
+      `${arrow} ${Math.abs(change).toFixed(2)} (${change>=0?'+':''}${changePct}%) ${isRed?'收紅':'收黑'}｜開盤 ${open.toFixed(1)}`;
+    document.getElementById('liveChange').style.color = color;
+    document.getElementById('liveDate').textContent   = dateStr + suffix;
+
+    // 動態更新瀏覽器 title
+    document.title = `台表科 6278｜${close.toFixed(1)} ${isRed?'▲':'▼'} ${dateStr}`;
+
+    const pnl      = close - COST;
+    const totalPnl = (pnl * SHARES * 1000 / 10000).toFixed(1);
+    const pnlColor = pnl >= 0 ? '#f05252' : '#34c77b';
+    const pnlSign  = pnl >= 0 ? '+' : '';
+    document.getElementById('metricPnl').textContent    = `${pnlSign}${pnl.toFixed(1)}元`;
+    document.getElementById('metricPnl').style.color    = pnlColor;
+    document.getElementById('metricPnlSub').textContent =
+      `每股${pnl>=0?'獲利':'浮虧'} · 共約 ${pnlSign}${totalPnl}萬`;
+
+    document.getElementById('metricClose').textContent    = close.toFixed(1);
+    document.getElementById('metricClose').style.color    = color;
+    document.getElementById('metricCloseSub').textContent =
+      `${isRed?'收紅':'收黑'}｜開盤 ${open.toFixed(1)} → 收 ${close.toFixed(1)}`;
+  }
+
+  function showManual() {
+    const m = MANUAL;
+    renderPrice(m.close, m.open, m.prevClose, m.date, true);
+  }
+
+  async function tryFetch(url) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
 
   async function fetchPrice() {
-    try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${SYMBOL}?interval=1d&range=2d`;
-      const res  = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-      const json = await res.json();
-      const meta = json.chart.result[0].meta;
+    const SYMBOL = '6278.TW';
+    const target = `https://query1.finance.yahoo.com/v8/finance/chart/${SYMBOL}?interval=1d&range=5d`;
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+      `https://corsproxy.io/?${encodeURIComponent(target)}`,
+      `https://proxy.cors.sh/${target}`,
+    ];
 
-      const close    = meta.regularMarketPrice;
-      const open     = meta.regularMarketOpen;
-      const prevClose= meta.chartPreviousClose;
-      const change   = close - prevClose;
-      const changePct= (change / prevClose * 100).toFixed(2);
-      const isRed    = close >= open;   // 台股：收盤 ≥ 開盤 = 紅K
-      const color    = isRed ? '#f05252' : '#34c77b';
-      const arrow    = change >= 0 ? '▲' : '▼';
+    for (const proxyUrl of proxies) {
+      try {
+        const json = await tryFetch(proxyUrl);
+        const meta = json?.chart?.result?.[0]?.meta;
+        if (!meta) continue;
 
-      // 取得日期
-      const ts   = meta.regularMarketTime * 1000;
-      const date = new Date(ts);
-      const dateStr = `${date.getFullYear()} / ${String(date.getMonth()+1).padStart(2,'0')} / ${String(date.getDate()).padStart(2,'0')} 收盤（自動更新）`;
+        const close     = meta.regularMarketPrice;
+        const open      = meta.regularMarketOpen;
+        const prevClose = meta.chartPreviousClose;
+        const ts        = meta.regularMarketTime * 1000;
+        const d         = new Date(ts);
+        const dateStr   = `${d.getFullYear()} / ${String(d.getMonth()+1).padStart(2,'0')} / ${String(d.getDate()).padStart(2,'0')} 收盤`;
 
-      // Header
-      document.getElementById('livePrice').textContent  = close.toFixed(1);
-      document.getElementById('livePrice').style.color  = color;
-      document.getElementById('liveChange').textContent =
-        `${arrow} ${Math.abs(change).toFixed(2)} (${change>=0?'+':''}${changePct}%) ${isRed?'收紅':'收黑'}｜開盤 ${open.toFixed(1)}`;
-      document.getElementById('liveChange').style.color = color;
-      document.getElementById('liveDate').textContent   = dateStr;
-
-      // 帳面損益
-      const pnl      = close - COST;
-      const totalPnl = (pnl * SHARES * 1000 / 10000).toFixed(1);
-      const pnlColor = pnl >= 0 ? '#f05252' : '#34c77b';
-      const pnlSign  = pnl >= 0 ? '+' : '';
-      document.getElementById('metricPnl').textContent     = `${pnlSign}${pnl.toFixed(1)}元`;
-      document.getElementById('metricPnl').style.color     = pnlColor;
-      document.getElementById('metricPnlSub').textContent  =
-        `每股${pnl>=0?'獲利':'浮虧'} · 共約 ${pnlSign}${totalPnl}萬`;
-
-      // 今日收盤 metric
-      document.getElementById('metricClose').textContent    = close.toFixed(1);
-      document.getElementById('metricClose').style.color    = color;
-      document.getElementById('metricCloseSub').textContent =
-        `${isRed?'收紅':'收黑'}｜開盤 ${open.toFixed(1)} → 收 ${close.toFixed(1)}`;
-
-    } catch(e) {
-      document.getElementById('livePrice').textContent  = '—';
-      document.getElementById('liveChange').textContent = '股價資料暫時無法取得，請稍後重新整理';
-      document.getElementById('liveDate').textContent   = '';
-      document.getElementById('metricPnl').textContent  = '—';
-      document.getElementById('metricClose').textContent= '—';
+        renderPrice(close, open, prevClose, dateStr, false);
+        return; // 成功就停止
+      } catch(_) { /* 繼續試下一個 proxy */ }
     }
+
+    // 全部失敗 → 顯示手動資料
+    showManual();
   }
 
   fetchPrice();
